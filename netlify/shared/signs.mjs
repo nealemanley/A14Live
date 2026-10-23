@@ -55,11 +55,13 @@ function summariseSign(ctrl, st) {
   const ident = ext.externalIdentifier || ctrl.vmsControllerReference?.idG || "";
   const onA14 = roads.some((r) => /^A14$/i.test(r.trim())) || /(^|\/)A14\//i.test(ident) || /signs\/A14-/i.test(ident);
   if (!onA14 || distToRouteKm(lat, lon) > 1.5) return null;
-  if (st.workingStatus && st.workingStatus !== "working") return null;
+  // The feed pads values (e.g. "working "), so compare trimmed.
+  const status = String(st.workingStatus || "").trim();
+  if (status && status !== "working") return null;
 
   for (const m of st.vmsMessage || []) {
     const msg = m.vmsMessage || {};
-    const types = msg.messageInformationType || [];
+    const types = (msg.messageInformationType || []).map((t) => String(t).trim());
     const lines = [];
     for (const da of msg.displayAreaSettings || []) {
       const tl = da.displayAreaSettings?.vmsTextDisplay?.textLine || [];
@@ -117,7 +119,7 @@ function rawView(ctrl, st, kept) {
   const text = (st.vmsMessage || []).flatMap((m) => (m.vmsMessage?.displayAreaSettings || []).flatMap((d) =>
     (d.displayAreaSettings?.vmsTextDisplay?.textLine || []).map((l) => l.textLine?.textLine).filter(Boolean))).join(" / ");
   return { ident: ext.externalIdentifier || ctrl.vmsControllerReference?.idG, roads: (loc.supplementaryPositionalDescription?.roadInformation || []).map((r) => r.roadName),
-    kmFromRoute: c.latitude ? +distToRouteKm(+c.latitude, +c.longitude).toFixed(2) : null, status: st.workingStatus || null,
+    kmFromRoute: c.latitude ? +distToRouteKm(+c.latitude, +c.longitude).toFixed(2) : null, status: String(st.workingStatus || "").trim() || null,
     types: (st.vmsMessage || []).flatMap((m) => m.vmsMessage?.messageInformationType || []), text: text || null, kept };
 }
 

@@ -121,7 +121,8 @@ function extractEvents(body, closureType) {
 }
 
 const asList = (x) => (x == null ? [] : Array.isArray(x) ? x : [x]);
-const enumVal = (x) => (x == null ? null : typeof x === "string" ? x : x.extendedValueG || x.value || null);
+// The feed sometimes pads values with spaces, so trim every enum.
+const enumVal = (x) => { const v = x == null ? null : typeof x === "string" ? x : x.extendedValueG || x.value || null; return v == null ? null : String(v).trim() || null; };
 
 function summarise(sit, closureType, i) {
   const records = asList(sit.situationRecord).map((r) => r?.sitRoadOrCarriagewayOrLaneManagement || Object.values(r || {})[0]).filter(isObj);
@@ -133,14 +134,14 @@ function summarise(sit, closureType, i) {
 
   for (const rec of records) {
     const m = enumVal(rec.roadOrCarriagewayOrLaneManagementType); if (m) mgmt.add(m);
-    if (rec.cause?.causeType) causes.add(rec.cause.causeType);
+    if (rec.cause?.causeType) causes.add(String(rec.cause.causeType).trim());
     for (const v of Object.values(rec.cause?.detailedCauseType || {})) for (const d of asList(v)) { const e = enumVal(d); if (e && e !== "other" && e !== "extendedG") details.add(e); }
     for (const c of asList(rec.generalPublicComment)) { const t = cleanComment(c?.comment); if (t) comments.push(t); }
     const vt = rec.validity?.validityTimeSpecification || {};
     if (vt.overallStartTime && (!start || vt.overallStartTime < start)) start = vt.overallStartTime;
     if (vt.overallEndTime && (!end || vt.overallEndTime > end)) end = vt.overallEndTime;
     if (rec.situationRecordVersionTime && (!updated || rec.situationRecordVersionTime > updated)) updated = rec.situationRecordVersionTime;
-    status = rec.validity?.validityStatus || status;
+    status = rec.validity?.validityStatus ? String(rec.validity.validityStatus).trim() : status;
     source = rec.source?.sourceIdentification || source;
 
     // Location: walk only the location keys we know about.

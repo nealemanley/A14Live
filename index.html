@@ -1,0 +1,595 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>A14 Live Suffolk</title>
+<meta name="description" content="Live incidents, accidents, lane and road closures on the A14 from Newmarket to Felixstowe, including the Orwell Bridge.">
+<meta name="theme-color" content="#0b5d3b">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@600;700;800&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+/* Layout: sign-green header band; desktop = list panel left + full-height map right; phone = map on top, list below. */
+:root{
+  --sign:#0b5d3b; --sign-ink:#ffffff; --route:#ffd200;
+  --bg:#f3f5f2; --panel:#ffffff; --fg:#17201b; --muted:#5d6a62; --line:#dde3de; --hover:#eef3ef;
+  --closure:#c8102e; --accident:#e0491b; --incident:#d98a00; --lanes:#b88400; --works:#2f6db3; --ok:#1f8a4c;
+  --tag-bg:#f0f2ef; --vms:#6a4cc2; --vms-bg:#121212; --vms-fg:#ffb000;
+  --font-display:"Barlow Semi Condensed","Arial Narrow",Arial,sans-serif;
+  --font-body:"Barlow",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+  --panel-w:420px;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --sign:#0a4a30; --bg:#0f1512; --panel:#151d19; --fg:#e7eee9; --muted:#9aa9a0; --line:#25312b; --hover:#1c2621;
+  --closure:#ff5468; --accident:#ff7a4a; --incident:#f2b13c; --lanes:#e6c24a; --works:#6aa5ec; --ok:#4cc27e; --tag-bg:#1d2722; --vms:#a68cf2; --vms-bg:#050505;
+  color-scheme:dark}}
+:root[data-theme="dark"]{
+  --sign:#0a4a30; --bg:#0f1512; --panel:#151d19; --fg:#e7eee9; --muted:#9aa9a0; --line:#25312b; --hover:#1c2621;
+  --closure:#ff5468; --accident:#ff7a4a; --incident:#f2b13c; --lanes:#e6c24a; --works:#6aa5ec; --ok:#4cc27e; --tag-bg:#1d2722; --vms:#a68cf2; --vms-bg:#050505;
+  color-scheme:dark}
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 var(--font-body);display:flex;flex-direction:column}
+button{font:inherit;color:inherit;cursor:pointer}
+:focus-visible{outline:3px solid var(--route);outline-offset:2px}
+
+/* Header */
+header{background:var(--sign);color:var(--sign-ink);padding-block:max(10px,env(safe-area-inset-top,0px)) 10px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  display:flex;align-items:center;gap:14px;flex-wrap:wrap;border-bottom:3px solid #fff}
+.shield{font-family:var(--font-display);font-weight:800;font-size:26px;line-height:1;color:var(--route);
+  border:2px solid #fff;border-radius:4px;padding:4px 9px 3px;letter-spacing:.5px}
+.brand{display:flex;flex-direction:column;min-width:0}
+.brand h1{margin:0;font:700 20px/1.1 var(--font-display);letter-spacing:.3px}
+.brand span{font-size:13px;opacity:.85}
+.status{margin-left:auto;display:flex;align-items:center;gap:10px;font-size:13px}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--route);box-shadow:0 0 0 0 rgba(255,210,0,.7);animation:pulse 2s infinite}
+.dot.err{background:#ff8a8a;animation:none}
+@keyframes pulse{70%{box-shadow:0 0 0 8px rgba(255,210,0,0)}100%{box-shadow:0 0 0 0 rgba(255,210,0,0)}}
+.refresh{background:transparent;border:1px solid rgba(255,255,255,.55);color:#fff;border-radius:6px;padding:5px 10px;font-weight:600}
+.refresh:hover{background:rgba(255,255,255,.12)}
+
+/* Main split */
+main{flex:1;display:grid;grid-template-columns:var(--panel-w) 1fr;min-height:0}
+#panel{background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0;min-width:0}
+#map{min-height:0;background:var(--bg)}
+
+/* Bridge + summary */
+.summary{padding:14px 16px 10px;display:grid;gap:10px;border-bottom:1px solid var(--line)}
+.bridge{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;background:var(--tag-bg);border:1px solid var(--line);text-align:left;width:100%}
+.bridge .ico{width:34px;height:20px;flex:none;color:var(--ok)}
+.bridge b{font:700 15px/1.2 var(--font-display);letter-spacing:.3px;display:block}
+.bridge small{color:var(--muted);font-size:13px}
+.bridge.alert .ico{color:var(--closure)}
+.bridge.alert{border-color:color-mix(in srgb,var(--closure) 45%,var(--line))}
+.bridge.warn .ico{color:var(--incident)}
+
+.filters{display:flex;gap:6px;flex-wrap:wrap}
+.chip{border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:4px 10px;font-size:13px;font-weight:600;display:inline-flex;gap:6px;align-items:center}
+.chip i{width:8px;height:8px;border-radius:50%;display:inline-block}
+.chip .n{font-variant-numeric:tabular-nums;color:var(--muted);font-weight:500}
+.chip[aria-pressed="true"]{background:var(--fg);color:var(--panel);border-color:var(--fg)}
+.chip[aria-pressed="true"] .n{color:inherit;opacity:.75}
+.seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;width:max-content}
+.seg button{border:0;background:transparent;padding:5px 11px;font-size:13px;font-weight:600}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button[aria-pressed="true"]{background:var(--sign);color:#fff}
+
+/* List */
+#list{overflow:auto;flex:1;padding:8px 0 16px;min-height:0}
+.group{font:700 12px/1 var(--font-display);text-transform:uppercase;letter-spacing:1.2px;color:var(--muted);padding:12px 16px 6px}
+.item{display:grid;grid-template-columns:4px 1fr;gap:12px;width:100%;text-align:left;border:0;background:transparent;padding:11px 16px 11px 12px;border-bottom:1px solid var(--line)}
+.item:hover{background:var(--hover)}
+.item[aria-current="true"]{background:var(--hover);box-shadow:inset 3px 0 0 var(--fg)}
+.stripe{border-radius:2px}
+.body{min-width:0;display:grid;gap:4px}
+.top{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.top b{font:700 17px/1.15 var(--font-display);letter-spacing:.2px}
+.where{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:13px;color:var(--muted)}
+.jn{font:700 12px/1 var(--font-display);background:#111;color:#fff;border-radius:3px;padding:3px 5px;letter-spacing:.4px}
+.tag{font-size:12px;font-weight:600;padding:2px 7px;border-radius:4px;background:var(--tag-bg);color:var(--fg)}
+.tag.orwell{background:var(--route);color:#111}
+.desc{font-size:14px;color:var(--fg);overflow-wrap:anywhere}
+.time{font:500 12px/1.3 var(--font-mono);color:var(--muted);font-variant-numeric:tabular-nums}
+
+.tabs{display:grid;grid-template-columns:repeat(3,1fr);border-bottom:1px solid var(--line)}
+.tabs button{border:0;background:transparent;padding:11px 4px 9px;font:700 14px/1.2 var(--font-display);text-align:center;white-space:nowrap;letter-spacing:.3px;color:var(--muted);border-bottom:3px solid transparent;display:flex;gap:6px;justify-content:center;align-items:center}
+.tabs button[aria-selected="true"]{color:var(--fg);border-bottom-color:var(--sign)}
+.tabs .n{font:600 12px/1 var(--font-body);background:var(--tag-bg);border-radius:999px;padding:2px 7px;font-variant-numeric:tabular-nums}
+.tabs button[aria-selected="true"] .n{background:var(--accident);color:#fff}
+.vms{display:inline-flex;flex-direction:column;gap:2px;background:var(--vms-bg);color:var(--vms-fg);font:500 13px/1.25 var(--font-mono);letter-spacing:1px;padding:6px 9px;border-radius:4px;text-transform:uppercase}
+.tag.src{background:transparent;border:1px solid var(--line);color:var(--muted)}
+.tag.ongoing{background:var(--accident);color:#fff}
+.note{padding:10px 16px 0;font-size:13px;color:var(--muted)}
+.local{padding:12px 16px 16px;display:grid;gap:14px}
+.src-card{border:1px solid var(--line);border-radius:8px;padding:12px;display:grid;gap:8px;background:var(--panel)}
+.src-card h2{margin:0;font:700 17px/1.2 var(--font-display);letter-spacing:.2px}
+.src-card p{margin:0;font-size:13px;color:var(--muted)}
+.fb-link{justify-self:start;display:inline-flex;align-items:center;gap:6px;background:#1877f2;color:#fff;text-decoration:none;font-weight:600;font-size:14px;padding:7px 12px;border-radius:6px}
+.fb-link:hover{filter:brightness(1.08)}
+.fbframe{width:100%;max-width:500px;border:0;border-radius:6px;background:var(--tag-bg);display:block}
+.empty{padding:28px 20px;text-align:center;color:var(--muted)}
+.empty b{display:block;color:var(--ok);font:700 20px/1.2 var(--font-display);margin-bottom:4px}
+.banner{margin:10px 16px 0;padding:10px 12px;border-radius:8px;font-size:13px;border:1px solid var(--line);background:var(--tag-bg)}
+.banner.sample{background:var(--route);color:#111;border-color:transparent;font-weight:600}
+.banner.error{border-color:color-mix(in srgb,var(--closure) 50%,var(--line))}
+.banner button{margin-top:8px;border:1px solid currentColor;background:transparent;border-radius:6px;padding:4px 10px;font-weight:600}
+footer{padding:10px 16px max(10px,env(safe-area-inset-bottom,0px));font-size:12px;color:var(--muted);border-top:1px solid var(--line)}
+footer a{color:inherit}
+
+/* Map bits */
+.leaflet-container{font-family:var(--font-body)}
+.dark-tiles .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.85) contrast(.9) saturate(.6)}
+.jlabel{font:700 11px/1 var(--font-display);background:#111;color:#fff;border-radius:3px;padding:2px 4px;white-space:nowrap;border:1px solid #fff}
+.pin{width:26px;height:26px;border-radius:50%;border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45);display:grid;place-items:center;color:#fff;font:800 13px/1 var(--font-display)}
+.pin.past{opacity:.75;border-style:dashed}
+.pin.sel{transform:scale(1.35);box-shadow:0 0 0 6px rgba(255,210,0,.55),0 1px 4px rgba(0,0,0,.45)}
+.leaflet-popup-content{margin:10px 12px;font-size:13px}
+.leaflet-popup-content b{font:700 15px/1.2 var(--font-display)}
+
+@media (max-width:820px){
+  main{grid-template-columns:1fr;grid-template-rows:42vh auto}
+  #map{order:-1;border-bottom:1px solid var(--line)}
+  #panel{border-right:0}
+  #list{overflow:visible}
+  body{display:block}
+  html,body{height:auto}
+  .status .label{display:none}
+}
+@media (prefers-reduced-motion:reduce){.dot{animation:none}}
+</style>
+</head>
+<body>
+<header>
+  <div class="shield" aria-hidden="true">A14</div>
+  <div class="brand">
+    <h1>A14 Live · Suffolk</h1>
+    <span>Newmarket (J37) to Felixstowe (J62)</span>
+  </div>
+  <div class="status" role="status" aria-live="polite">
+    <span class="dot" id="dot"></span>
+    <span><span class="label">Updated </span><span id="updated">loading…</span></span>
+    <button class="refresh" id="refresh" type="button">Refresh</button>
+  </div>
+</header>
+
+<main>
+  <section id="panel" aria-label="Incidents">
+    <div class="tabs" role="tablist" id="tabs">
+      <button type="button" role="tab" id="tab-live" data-view="live" aria-selected="true">Live now</button>
+      <button type="button" role="tab" id="tab-history" data-view="history" aria-selected="false">Accidents 24h <span class="n" id="histCount">0</span></button>
+      <button type="button" role="tab" id="tab-local" data-view="local" aria-selected="false">Local updates</button>
+    </div>
+    <div class="summary" id="summary">
+      <button class="bridge" id="bridge" type="button" aria-label="Show Orwell Bridge on the map">
+        <svg class="ico" viewBox="0 0 34 20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M1 7h32M4 7v12M30 7v12M10 7c0 6 4 10 7 10s7-4 7-10" stroke-linecap="round"/></svg>
+        <span><b id="bridgeTitle">Orwell Bridge</b><small id="bridgeText">Checking…</small></span>
+      </button>
+      <div class="filters" id="filters" role="group" aria-label="Filter by type"></div>
+      <div class="seg" id="dir" role="group" aria-label="Direction">
+        <button type="button" data-d="all" aria-pressed="true">Both ways</button>
+        <button type="button" data-d="Eastbound" aria-pressed="false">Eastbound</button>
+        <button type="button" data-d="Westbound" aria-pressed="false">Westbound</button>
+      </div>
+    </div>
+    <div id="banner"></div>
+    <div id="list" aria-live="polite"></div>
+    <footer>Data: <a href="https://developer.data.nationalhighways.co.uk" target="_blank" rel="noopener">National Highways</a> road and lane closures and overhead sign messages, refreshed every 2 minutes. Junction positions are approximate. Check <a href="https://www.trafficengland.com" target="_blank" rel="noopener">Traffic England</a> before you travel and never use this while driving.</footer>
+  </section>
+  <div id="map" role="region" aria-label="Map of the A14"></div>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+(() => {
+const API_URL = "/api/a14";
+const REFRESH_MS = 120000;
+
+// Approximate A14 junctions, west → east (keep in sync with the server function).
+const J = [
+  ["37",52.2738,0.3923,"Newmarket / Exning"],["38",52.2808,0.4405,"A11 Thetford"],["39",52.2656,0.4985,"Kentford"],
+  ["40",52.2611,0.5642,"Higham"],["41",52.2562,0.6432,"Risby"],["42",52.2536,0.6893,"Bury St Edmunds W"],
+  ["43",52.2583,0.7128,"Bury St Edmunds"],["44",52.2421,0.7423,"Bury St Edmunds E"],["45",52.2398,0.7722,"Rougham"],
+  ["46",52.2449,0.8371,"Beyton"],["47",52.2369,0.8921,"Woolpit"],["47A",52.2212,0.9441,"Haughley"],
+  ["49",52.2119,0.9781,"Tot Hill"],["50",52.1951,1.0052,"Stowmarket"],["51",52.1532,1.0631,"Beacon Hill"],
+  ["52",52.1081,1.1041,"Claydon"],["53",52.0801,1.1152,"Whitehouse"],["54",52.0571,1.1001,"Sproughton"],
+  ["55",52.0312,1.1052,"Copdock"],["56",52.0281,1.1401,"Wherstead"],["57",52.0392,1.2152,"Nacton"],
+  ["58",52.0401,1.2551,"Seven Hills"],["59",51.9901,1.3051,"Trimley"],["60",51.9702,1.3252,"Dock Spur"],
+  ["61",51.9621,1.3272,"Dock Gate 2"],["62",51.9521,1.3381,"Dock Gate 1"]];
+// Route line: junctions plus the Orwell Bridge deck between J56 and J57.
+const BRIDGE = [[52.0262,1.1588],[52.0300,1.1720],[52.0338,1.1860]];
+const ROUTE = [...J.slice(0,20).map(j=>[j[1],j[2]]), ...BRIDGE, ...J.slice(20).map(j=>[j[1],j[2]])];
+
+const CATS = {
+  all:{label:"All"},
+  closure:{label:"Closures",color:"--closure",glyph:"✕"},
+  accident:{label:"Accidents",color:"--accident",glyph:"!"},
+  incident:{label:"Incidents",color:"--incident",glyph:"!"},
+  lanes:{label:"Lane closures",color:"--lanes",glyph:"⇢"},
+  sign:{label:"Sign messages",color:"--vms",glyph:"▤"},
+  roadworks:{label:"Roadworks",color:"--works",glyph:"W"},
+};
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const $ = id => document.getElementById(id);
+
+let state = { events:[], history:[], view:"live", signsStatus:"ok", historyStatus:"ok", cat:"all", dir:"all", selected:null, sample:false, fetchedAt:null, error:null };
+try { const s = JSON.parse(localStorage.getItem("a14prefs")||"{}"); if (s.cat) state.cat=s.cat; if (s.dir) state.dir=s.dir; if (s.view==="live"||s.view==="history") state.view=s.view; } catch {}
+const savePrefs = () => { try { localStorage.setItem("a14prefs", JSON.stringify({cat:state.cat,dir:state.dir,view:state.view})); } catch {} };
+
+// ---------- Map ----------
+const map = L.map("map",{zoomControl:true,attributionControl:true}).fitBounds(L.latLngBounds(ROUTE).pad(0.06));
+const dark = () => matchMedia("(prefers-color-scheme: dark)").matches && document.documentElement.dataset.theme!=="light" || document.documentElement.dataset.theme==="dark";
+let tiles;
+// OpenStreetMap standard tiles (no key needed). Dark mode darkens them with a CSS filter.
+function setTiles(){
+  if (!tiles) tiles = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{
+    maxZoom:19, attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'}).addTo(map);
+  document.getElementById("map").classList.toggle("dark-tiles", dark());
+}
+setTiles();
+matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change",setTiles);
+
+// ---- Route: straight junction-to-junction fallback, replaced by the real OpenStreetMap shape when /api/route answers.
+const routeLayer = L.layerGroup().addTo(map);
+let realSegs = null, realBridge = null;
+const bridgeLines = () => realBridge || [BRIDGE]; // [{a,b,s,d}] real road pieces with their distance along the route (km) and offset from it
+function drawRoute(lines, bridgeLines){
+  routeLayer.clearLayers();
+  L.polyline(lines,{color:"#ffffff",weight:9,opacity:.9,interactive:false}).addTo(routeLayer);
+  L.polyline(lines,{color:css("--sign")||"#0b5d3b",weight:5,opacity:.95,interactive:false}).addTo(routeLayer);
+  L.polyline(bridgeLines,{color:"#ffd200",weight:5,opacity:1,dashArray:"2 6"}).bindTooltip("Orwell Bridge",{direction:"top"}).addTo(routeLayer);
+}
+drawRoute([ROUTE],[BRIDGE]);
+
+const jLayer = L.layerGroup().addTo(map);
+function drawJunctions(){
+  jLayer.clearLayers();
+  J.forEach(j => L.marker([j[1],j[2]],{icon:L.divIcon({className:"",html:`<span class="jlabel">J${j[0]}</span>`,iconSize:null,iconAnchor:[14,9]}),keyboard:false,interactive:true})
+    .bindTooltip(`J${j[0]} · ${j[3]}`).addTo(jLayer));
+}
+drawJunctions();
+const toggleJ = () => { map.getZoom()>=10 ? jLayer.addTo(map) : jLayer.remove(); };
+map.on("zoomend",toggleJ); toggleJ();
+
+const evLayer = L.layerGroup().addTo(map);
+const hiLayer = L.layerGroup().addTo(map);
+let markers = {};
+
+// Distance along the junction chain (km) and offset from it, for any point.
+const KX = Math.cos(52*Math.PI/180)*111.32, KY = 110.57;
+function chainPos(lat,lon){
+  const pts = chainPts();
+  let best = {s:0,d:Infinity}, acc = 0;
+  for (let i=0;i+1<pts.length;i++){
+    const ax=pts[i][1]*KX, ay=pts[i][0]*KY, bx=pts[i+1][1]*KX, by=pts[i+1][0]*KY, px=lon*KX, py=lat*KY;
+    const dx=bx-ax, dy=by-ay, L2=dx*dx+dy*dy, len=Math.sqrt(L2);
+    const t = L2 ? Math.max(0,Math.min(1,((px-ax)*dx+(py-ay)*dy)/L2)) : 0;
+    const d = Math.hypot(px-(ax+t*dx), py-(ay+t*dy));
+    if (d < best.d) best = {s:acc+t*len, d};
+    acc += len;
+  }
+  return best;
+}
+let _chain = null;
+function chainPts(){ return _chain ||= J.map(j=>[j[1],j[2]]); }
+
+function useRealRoute(data){
+  // Move junctions to their OpenStreetMap positions (only where a sensible match exists).
+  for (const oj of data.junctions||[]) {
+    const j = J.find(x=>x[0]===oj.ref);
+    if (j && Math.hypot((j[1]-oj.lat)*KY,(j[2]-oj.lon)*KX) < 6) { j[1]=oj.lat; j[2]=oj.lon; if (oj.name) j[3]=oj.name; }
+  }
+  _chain = null;
+  const bridge = data.bridge?.length ? data.bridge : [BRIDGE];
+  realBridge = data.bridge?.length ? data.bridge : null;
+  drawRoute(data.lines, bridge);
+  drawJunctions();
+  realSegs = [];
+  for (const line of data.lines) for (let i=0;i+1<line.length;i++){
+    const a=line[i], b=line[i+1], m=chainPos((a[0]+b[0])/2,(a[1]+b[1])/2);
+    if (m.d < 2) realSegs.push({a,b,s:m.s});
+  }
+}
+
+// Road between two junctions: real road pieces when available, otherwise a straight chain.
+function segmentBetween(a,b){
+  const ja = J.find(j=>j[0]===a), jb = J.find(j=>j[0]===b);
+  if (!ja||!jb) return null;
+  if (realSegs?.length){
+    let s1 = chainPos(ja[1],ja[2]).s, s2 = chainPos(jb[1],jb[2]).s;
+    if (s1>s2) [s1,s2]=[s2,s1];
+    if (s2-s1 < 0.3) { s1 -= 0.6; s2 += 0.6; } // single junction: show the road around it
+    const lines = realSegs.filter(g=>g.s>=s1-0.05 && g.s<=s2+0.05).map(g=>[g.a,g.b]);
+    if (lines.length) return {lines};
+  }
+  const ia = J.indexOf(ja), ib = J.indexOf(jb), lo=Math.min(ia,ib), hi=Math.max(ia,ib);
+  const pts = J.slice(lo,hi+1).map(j=>[j[1],j[2]]);
+  if (lo<=19 && hi>=20) pts.splice(20-lo,0,...BRIDGE);
+  return pts.length>1 ? {lines:[pts]} : null;
+}
+// Geometry for an event: {lines:[[latlng...]...]}. Feed coordinates win; then junction range; then the bridge.
+function eventGeom(e){
+  if (e.marks && e.marks.length) return {lines:[], marks:e.marks};
+  if (e.points && e.points.length) return {lines:[e.points]};
+  if (e.fromJ) { const s = segmentBetween(e.fromJ, e.toJ||e.fromJ); if (s) return s; }
+  if (e.orwell) return {lines:[BRIDGE]};
+  return {lines:[]};
+}
+function flatPts(g){ return g.marks ? g.marks : g.lines.flat(); }
+function anchor(e){
+  const g = eventGeom(e), pts = flatPts(g); if (!pts.length) return null;
+  if (g.marks) return g.marks[0];
+  if (g.lines.length===1) return g.lines[0][Math.floor(g.lines[0].length/2)];
+  const c = L.latLngBounds(pts).getCenter(); // nearest real point to the middle
+  return pts.reduce((best,p)=> (Math.hypot(p[0]-c.lat,p[1]-c.lng) < Math.hypot(best[0]-c.lat,best[1]-c.lng) ? p : best), pts[0]);
+}
+
+function drawMarkers(list){
+  evLayer.clearLayers(); markers = {};
+  list.forEach(e => {
+    const a = anchor(e); if (!a) return;
+    const c = CATS[e.category];
+    const m = L.marker(a,{icon:pinIcon(e,false),title:e.title,riseOnHover:true})
+      .on("click",()=>select(e.id,{fromMap:true}))
+      .bindPopup(popupHtml(e),{autoPan:true});
+    m.addTo(evLayer); markers[e.id]=m;
+  });
+}
+function pinIcon(e,sel){
+  const c = CATS[e.category];
+  return L.divIcon({className:"",iconSize:[26,26],iconAnchor:[13,13],
+    html:`<div class="pin${sel?" sel":""}${e.past?" past":""}" style="background:${css(c.color)}">${c.glyph}</div>`});
+}
+function popupHtml(e){
+  return `<b>${esc(e.title)}</b><br>${esc(whereText(e))}${e.direction?` · ${esc(e.direction)}`:""}<br><span style="color:${css("--muted")}">${esc(timeText(e))}</span>`;
+}
+
+function highlight(e){
+  hiLayer.clearLayers();
+  Object.entries(markers).forEach(([id,m]) => { const it = findItem(id); if (it) m.setIcon(pinIcon(it,id===e?.id)); });
+  if (!e) return;
+  const g = eventGeom(e), pts = flatPts(g); if (!pts.length) return;
+  const col = css(CATS[e.category].color);
+  if (g.marks){
+    g.marks.forEach(p=>L.circleMarker(p,{radius:11,color:col,weight:3,fillColor:"#ffd200",fillOpacity:.6}).addTo(hiLayer));
+    if (g.marks.length>1) map.flyToBounds(L.latLngBounds(g.marks).pad(0.5),{maxZoom:15,duration:.8}); else map.flyTo(g.marks[0],14,{duration:.8});
+  } else if (pts.length>1){
+    L.polyline(g.lines,{color:"#ffd200",weight:16,opacity:.55,lineCap:"round"}).addTo(hiLayer);
+    L.polyline(g.lines,{color:col,weight:7,opacity:1,lineCap:"round"}).addTo(hiLayer);
+    map.flyToBounds(L.latLngBounds(pts).pad(0.35),{maxZoom:15,duration:.8});
+  } else {
+    L.circle(pts[0],{radius:450,color:col,weight:2,fillColor:"#ffd200",fillOpacity:.25}).addTo(hiLayer);
+    map.flyTo(pts[0],14,{duration:.8});
+  }
+  markers[e.id]?.openPopup();
+}
+
+// ---------- List ----------
+const esc = s => String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+function whereText(e){
+  if (e.location) return e.location;
+  if (e.fromJ && e.toJ && e.fromJ!==e.toJ) return `J${e.fromJ} to J${e.toJ}`;
+  if (e.fromJ) return `Near J${e.fromJ} ${J.find(j=>j[0]===e.fromJ)?.[3]??""}`.trim();
+  return e.orwell ? "Orwell Bridge" : "A14 Suffolk";
+}
+const fmtTime = iso => { const d=new Date(iso); return isNaN(d)?"":d.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}); };
+const fmtDay = iso => { const d=new Date(iso); if (isNaN(d)) return ""; const t=new Date(); const same=d.toDateString()===t.toDateString();
+  return same ? fmtTime(iso) : d.toLocaleString("en-GB",{weekday:"short",hour:"2-digit",minute:"2-digit"}); };
+function ago(iso){ const m=Math.round((Date.now()-new Date(iso))/60000); if (isNaN(m)) return ""; if (m<1) return "just now"; if (m<60) return `${m} min ago`; const h=Math.round(m/60); return h<24?`${h} hr ago`:`${Math.round(h/24)} days ago`; }
+function timeText(e){
+  if (e.past) {
+    const ongoing = state.fetchedAt && (new Date(state.fetchedAt) - new Date(e.lastSeen)) < 7*60000;
+    return `First reported ${fmtDay(e.firstSeen)}${ongoing ? " · still active" : ` · cleared by about ${fmtDay(e.lastSeen)}`}`;
+  }
+  if (e.kind==="sign") return e.updated ? `Sign set ${fmtTime(e.updated)} (${ago(e.updated)})` : "Showing now";
+  if (!e.live && e.start) return `Starts ${fmtDay(e.start)}${e.end?` · until ${fmtDay(e.end)}`:""}`;
+  const parts=[]; if (e.updated) parts.push(`Updated ${ago(e.updated)}`); if (e.end) parts.push(`expected until ${fmtDay(e.end)}`);
+  return parts.join(" · ") || "Active now";
+}
+
+function filtered(){
+  return state.events.filter(e => (state.cat==="all"||e.category===state.cat) &&
+    (state.dir==="all"||!e.direction||e.direction===state.dir||e.direction==="Both directions"));
+}
+
+function renderFilters(){
+  const counts = {all:state.events.length};
+  state.events.forEach(e=>counts[e.category]=(counts[e.category]||0)+1);
+  $("filters").innerHTML = Object.entries(CATS).filter(([k])=>k==="all"||counts[k]).map(([k,c]) =>
+    `<button type="button" class="chip" data-cat="${k}" aria-pressed="${state.cat===k}">${c.color?`<i style="background:var(${c.color})"></i>`:""}${c.label}<span class="n">${counts[k]||0}</span></button>`).join("");
+  if (state.cat!=="all" && !counts[state.cat]) { state.cat="all"; return renderFilters(); }
+  document.querySelectorAll("#dir button").forEach(b=>b.setAttribute("aria-pressed",b.dataset.d===state.dir));
+}
+
+function itemHtml(e){
+  const c = CATS[e.category];
+  return `<button type="button" class="item" data-id="${esc(e.id)}" aria-current="${state.selected===e.id}">
+    <span class="stripe" style="background:var(${c.color})"></span>
+    <span class="body">
+      <span class="top">${e.kind==="sign"?`<b class="vms" aria-label="Sign reads: ${esc(e.title)}">${(e.lines||[e.title]).map(l=>`<span>${esc(l)}</span>`).join("")}</b>`:`<b>${esc(e.title)}</b>`}${e.past&&isOngoing(e)?`<span class="tag ongoing">Still active</span>`:""}${e.direction?`<span class="tag">${esc(e.direction)}</span>`:""}${e.lanesText&&!e.title.includes(e.lanesText)?`<span class="tag">${esc(e.lanesText)}</span>`:""}${e.orwell?`<span class="tag orwell">Orwell Bridge</span>`:""}</span>
+      <span class="where">${e.fromJ?`<span class="jn">J${esc(e.fromJ)}</span>`:""}${e.toJ&&e.toJ!==e.fromJ?`→ <span class="jn">J${esc(e.toJ)}</span>`:""}<span>${esc(whereText(e))}</span></span>
+      ${e.detail?`<span class="desc">${esc(e.detail)}</span>`:""}
+      ${e.source?`<span><span class="tag src">${esc(e.source)}</span></span>`:""}
+      <span class="time">${esc(timeText(e))}</span>
+    </span></button>`;
+}
+
+function isOngoing(e){ return state.fetchedAt && (new Date(state.fetchedAt) - new Date(e.lastSeen)) < 7*60000; }
+function historyItems(){
+  return state.history.map(h=>({...h, category:"accident", past:true, live:false, kind:h.marks?.length?"signpast":undefined, lines:null}));
+}
+function currentItems(){ return state.view==="history" ? historyItems() : filtered(); }
+
+// ---------- Local updates: Facebook's own Page plugin (allowed on any site). Groups can't be embedded, so they get a link.
+const FB_PAGE = "https://www.facebook.com/suffolkpolice";
+const FB_GROUP = "https://www.facebook.com/share/g/1F6cGkFgMR/";
+function renderLocal(){
+  const w = Math.max(180, Math.min(500, Math.floor(($("list").clientWidth || 380) - 32)));
+  const h = Math.max(480, Math.min(900, innerHeight - 260));
+  const src = `https://www.facebook.com/plugins/page.php?href=${encodeURIComponent(FB_PAGE)}&tabs=timeline&width=${w}&height=${h}&small_header=true&adapt_container_width=true&hide_cover=true&show_facepile=false`;
+  $("list").innerHTML = `<div class="local">
+    <div class="note" style="padding:0">Posts from local Facebook pages often report accidents before National Highways does. They cover all of Suffolk, not just the A14, and aren't shown on the map.</div>
+    <div class="src-card">
+      <h2>Suffolk Travel and Information</h2>
+      <p>Facebook group. Facebook doesn't allow groups to be shown inside other sites, so this opens Facebook.</p>
+      <a class="fb-link" href="${FB_GROUP}" target="_blank" rel="noopener">Open the group on Facebook</a>
+    </div>
+    <div class="src-card">
+      <h2>Suffolk Constabulary</h2>
+      <iframe class="fbframe" title="Suffolk Constabulary posts on Facebook" src="${src}" width="${w}" height="${h}" scrolling="no" loading="lazy" allow="encrypted-media" referrerpolicy="strict-origin-when-cross-origin"></iframe>
+      <p>No posts showing? Your browser may be blocking Facebook content.</p>
+      <a class="fb-link" href="${FB_PAGE}" target="_blank" rel="noopener">Open Suffolk Constabulary on Facebook</a>
+    </div>
+  </div>`;
+  drawMarkers(filtered());
+}
+function findItem(id){ return (state.view==="history" ? historyItems() : state.events).find(x=>x.id===id); }
+
+function renderTabs(){
+  document.querySelectorAll("#tabs button").forEach(b=>b.setAttribute("aria-selected", b.dataset.view===state.view));
+  $("histCount").textContent = state.history.length;
+  $("summary").hidden = state.view!=="live";
+}
+
+function renderHistory(){
+  const list = historyItems();
+  let html = `<div class="note">Accidents reported on the A14 between Newmarket and Felixstowe in the last 24 hours, from National Highways closures and overhead signs.</div>`;
+  if (state.historyStatus!=="ok" && !state.sample) html += `<div class="banner error">The accident history isn't available right now. Live incidents still work.</div>`;
+  else if (!list.length) html += `<div class="empty"><b>No accidents recorded</b>None reported in the last 24 hours. The record starts from when this feature was switched on.</div>`;
+  else {
+    const on = list.filter(isOngoing), off = list.filter(e=>!isOngoing(e));
+    if (on.length) html += `<div class="group">Still active · ${on.length}</div>` + on.map(itemHtml).join("");
+    if (off.length) html += `<div class="group">Cleared · ${off.length}</div>` + off.map(itemHtml).join("");
+  }
+  $("list").innerHTML = html;
+  drawMarkers(list);
+  if (state.selected) highlight(findItem(state.selected));
+}
+
+function renderList(){
+  renderTabs();
+  if (state.view==="history") return renderHistory();
+  if (state.view==="local") { if (!$("list").querySelector(".fbframe")) renderLocal(); else drawMarkers(filtered()); return; }
+  const list = filtered();
+  const live = list.filter(e=>e.live), later = list.filter(e=>!e.live);
+  let html = "";
+  if (!list.length && !state.error) {
+    html = `<div class="empty"><b>No problems reported</b>${state.cat==="all"&&state.dir==="all"?"The A14 between Newmarket and Felixstowe is clear of reported incidents and closures.":"Nothing matches this filter."}</div>`;
+  } else {
+    if (live.length) html += `<div class="group">Now · ${live.length}</div>` + live.map(itemHtml).join("");
+    if (later.length) html += `<div class="group">Planned in the next 24 hours · ${later.length}</div>` + later.map(itemHtml).join("");
+  }
+  $("list").innerHTML = html;
+  drawMarkers(list);
+  if (state.selected) highlight(findItem(state.selected));
+}
+
+function renderBridge(){
+  const hits = state.events.filter(e=>e.orwell && e.live);
+  const b = $("bridge"); b.classList.remove("alert","warn");
+  if (state.error && !state.events.length) { $("bridgeText").textContent = "Status unavailable"; return; }
+  if (!hits.length) { $("bridgeText").textContent = "No reported closures or incidents"; return; }
+  const closed = hits.find(e=>e.category==="closure" || (e.kind==="sign" && /CLOSED/.test(e.title) && !/LANE/.test(e.title)));
+  b.classList.add(closed?"alert":"warn");
+  $("bridgeText").textContent = closed ? `Closed${closed.direction?` · ${closed.direction}`:""}` : `${hits.length} report${hits.length>1?"s":""}: ${hits.map(h=>h.kind==="sign"?`sign shows "${h.title}"`:h.title.toLowerCase()).join(", ")}`;
+}
+
+function renderBanner(){
+  let h = "";
+  if (state.sample) h = `<div class="banner sample">Sample data shown to preview the app. These are not real incidents. <br><button type="button" id="liveBtn">Try live data again</button></div>`;
+  else if (state.error) h = `<div class="banner error"><b>Live feed unavailable.</b> ${esc(state.error)}<br><button type="button" id="sampleBtn">Preview with sample data</button></div>`;
+  else if (state.view==="live" && state.signsStatus==="not_subscribed") h = `<div class="banner">Overhead sign messages are off. Subscribe to <b>Digital Variable Message Signs</b> on the National Highways developer portal to switch them on.</div>`;
+  $("banner").innerHTML = h;
+}
+
+function render(){ renderFilters(); renderBridge(); renderBanner(); renderList(); }
+
+function select(id,{fromMap}={}){
+  state.selected = state.selected===id && !fromMap ? null : id;
+  document.querySelectorAll(".item").forEach(el=>el.setAttribute("aria-current",el.dataset.id===state.selected));
+  const e = findItem(state.selected);
+  highlight(e);
+  if (fromMap) document.querySelector(`.item[data-id="${CSS.escape(id)}"]`)?.scrollIntoView({block:"nearest",behavior:"smooth"});
+  else if (e && innerWidth<=820) $("map").scrollIntoView({behavior:"smooth",block:"start"});
+}
+
+// ---------- Events ----------
+$("list").addEventListener("click",ev=>{ const b=ev.target.closest(".item"); if (b) select(b.dataset.id); });
+$("filters").addEventListener("click",ev=>{ const b=ev.target.closest(".chip"); if (!b) return; state.cat=b.dataset.cat; savePrefs(); renderFilters(); renderList(); });
+$("dir").addEventListener("click",ev=>{ const b=ev.target.closest("button"); if (!b) return; state.dir=b.dataset.d; savePrefs(); renderFilters(); renderList(); });
+$("banner").addEventListener("click",ev=>{ if (ev.target.id==="sampleBtn") loadSample(); if (ev.target.id==="liveBtn") load(true); });
+$("refresh").addEventListener("click",()=>load(true));
+$("tabs").addEventListener("click",ev=>{ const b=ev.target.closest("button[data-view]"); if (!b || b.dataset.view===state.view) return;
+  state.view=b.dataset.view; state.selected=null; hiLayer.clearLayers(); savePrefs(); renderBanner(); $("list").innerHTML=""; renderList(); });
+$("bridge").addEventListener("click",()=>{
+  const hit = state.events.find(e=>e.orwell && e.live);
+  if (hit) return select(hit.id);
+  const bl = bridgeLines(); hiLayer.clearLayers(); L.polyline(bl,{color:"#ffd200",weight:16,opacity:.55,lineCap:"round"}).addTo(hiLayer);
+  map.flyToBounds(L.latLngBounds(bl.flat()).pad(0.6),{maxZoom:15,duration:.8});
+  if (innerWidth<=820) $("map").scrollIntoView({behavior:"smooth"});
+});
+
+// ---------- Data ----------
+let timer;
+async function load(manual){
+  clearTimeout(timer);
+  $("refresh").disabled = true;
+  try {
+    const r = await fetch(API_URL + (manual?`?t=${Date.now()>>16}`:""), {headers:{accept:"application/json"}});
+    const data = await r.json().catch(()=>({ok:false,message:`The server returned ${r.status}.`}));
+    if (!data.ok) throw new Error(data.message || "The traffic server returned an error.");
+    state = {...state, events:[...(data.events||[]), ...(data.signs||[])], history:data.history||[], signsStatus:data.signsStatus||"ok",
+      historyStatus:data.historyStatus||"ok", fetchedAt:data.fetchedAt, error:null, sample:false};
+    $("dot").classList.remove("err");
+    $("updated").textContent = fmtTime(data.fetchedAt);
+  } catch (err) {
+    if (!state.sample) {
+      state.error = /Failed to fetch|NetworkError|Unexpected token/i.test(err.message) ? "This page can't reach its data service. It needs to run on the Netlify site with the API function set up." : err.message;
+      $("dot").classList.add("err");
+      $("updated").textContent = state.fetchedAt ? `${fmtTime(state.fetchedAt)} (stale)` : "offline";
+    }
+  } finally {
+    $("refresh").disabled = false;
+    render();
+    if (!state.sample) timer = setTimeout(()=>load(false), REFRESH_MS);
+  }
+}
+document.addEventListener("visibilitychange",()=>{ if (!document.hidden && !state.sample && state.fetchedAt && Date.now()-new Date(state.fetchedAt)>REFRESH_MS) load(false); });
+
+function loadSample(){
+  clearTimeout(timer);
+  const t = m => new Date(Date.now()+m*60000).toISOString();
+  state = {...state, sample:true, error:null, selected:null, events:[
+    {id:"s1",category:"closure",live:true,title:"Road closed",direction:"Eastbound",fromJ:"56",toJ:"57",orwell:true,location:"A14 eastbound between J56 and J57",detail:"SAMPLE: Orwell Bridge closed eastbound due to high winds. Diversion via Ipswich town centre.",updated:t(-12),end:t(180)},
+    {id:"s2",category:"accident",live:true,title:"Accident",direction:"Westbound",fromJ:"43",toJ:"42",location:"A14 westbound between J43 and J42",lanesText:"1 lane closed (1 open)",detail:"SAMPLE: Two vehicles involved, lane 2 of 2 blocked.",updated:t(-6)},
+    {id:"s3",category:"incident",live:true,title:"Broken-down vehicle",direction:"Eastbound",fromJ:"50",toJ:"50",location:"A14 eastbound within J50 Stowmarket",detail:"SAMPLE: Vehicle on the hard shoulder near Stowmarket.",updated:t(-25)},
+    {id:"s4",category:"lanes",live:true,title:"1 lane closed",direction:"Westbound",fromJ:"58",toJ:"57",lanes:1,location:"A14 westbound between J58 and J57",detail:"SAMPLE: Barrier repairs.",updated:t(-60),end:t(240)},
+    {id:"s5",category:"roadworks",live:false,title:"Roadworks",direction:"Both directions",fromJ:"38",toJ:"39",location:"A14 between J38 and J39",detail:"SAMPLE: Overnight resurfacing with full closure.",start:t(150),end:t(600)},
+    {id:"s6",kind:"sign",category:"sign",severity:"incident",live:true,title:"QUEUE AHEAD · SLOW DOWN",lines:["QUEUE AHEAD","SLOW DOWN"],direction:"Westbound",fromJ:"44",toJ:"43",location:"2 overhead signs between J43 and J44 (SAMPLE)",marks:[[52.2445,0.7380],[52.2500,0.7250]],updated:t(-4)}],
+    fetchedAt:t(0), history:[
+    {id:"h1",source:"Overhead sign",title:"ACCIDENT · A14 CLOSED J57-J58",location:"SAMPLE: 2 overhead signs near J57 Nacton",direction:"Eastbound",fromJ:"57",toJ:"57",marks:[[52.0395,1.2050],[52.0330,1.1800]],firstSeen:t(-50),lastSeen:t(-2)},
+    {id:"h2",source:"National Highways closure",title:"Accident",location:"SAMPLE: A14 westbound between J52 and J51",direction:"Westbound",fromJ:"51",toJ:"52",points:[],firstSeen:t(-600),lastSeen:t(-480)}]};
+  $("updated").textContent = "sample";
+  render();
+}
+
+// Real road shape (cached per browser for a day, and on Netlify's CDN for a week).
+(async () => {
+  let data = null;
+  try { const c = JSON.parse(localStorage.getItem("a14route")||"null"); if (c && Date.now()-c.t < 864e5) data = c.d; } catch {}
+  if (!data) {
+    try { const r = await fetch("/api/route"); const d = await r.json(); if (d.ok && d.lines?.length) { data = d; try { localStorage.setItem("a14route", JSON.stringify({t:Date.now(), d})); } catch {} } } catch {}
+  }
+  if (data) { useRealRoute(data); renderList(); }
+})();
+if (location.hash==="#sample") loadSample(); else load(false);
+})();
+</script>
+</body>
+</html>

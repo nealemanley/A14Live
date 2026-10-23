@@ -15,7 +15,7 @@ Live incidents, accidents, lane closures and road closures on the A14 from Newma
 ## Set it up (about 10 minutes)
 
 1. **Get a free API key.** Sign up at https://developer.data.nationalhighways.co.uk, go to Subscriptions, subscribe to **Road and Lane Closures** and **Digital Variable Message Signs**, then copy your key from your Profile page. If the signs subscription gives you a different key, add it as `NH_DVMS_KEY` as well.
-2. **Deploy to Netlify.** Drag this zip (or the unzipped folder) onto https://app.netlify.com/drop, or onto the Deploys tab of an existing site.
+2. **Deploy to Netlify.** Link this GitHub repository to the Netlify site (Project configuration → Build & deploy → Link repository). Every push to `main` then deploys automatically.
 3. **Add the key.** In Netlify: Site configuration → Environment variables → add `NH_API_KEY` with your key.
 4. **Redeploy** (Deploys → Trigger deploy). Open the site and the list fills with live data.
 

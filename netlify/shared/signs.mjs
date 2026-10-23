@@ -28,18 +28,20 @@ export async function getSigns(key, debug = false) {
   if (!pages) throw new Error(`signs: ${lastErr ? lastErr.message : "no data"}`);
   bboxOrder = used;
 
-  const signs = [];
+  const signs = [], all = [];
   let total = 0;
   for (const page of pages) for (const ctrl of page?.D2Payload?.vmsControllerStatus || []) {
     for (const vs of ctrl.vmsStatus || []) {
       total++;
-      const s = summariseSign(ctrl, vs.vmsStatus || {});
+      const st = vs.vmsStatus || {};
+      const s = summariseSign(ctrl, st);
       if (s) signs.push(s);
+      if (debug) all.push(rawView(ctrl, st, !!s));
     }
   }
   const items = group(signs);
   const out = { items };
-  if (debug) out.debug = { signsInResponse: total, a14SignsWithMessages: signs.length, bbox: used, sample: signs.slice(0, 15) };
+  if (debug) out.debug = { signsInResponse: total, a14SignsWithMessages: signs.length, bbox: used, sample: signs.slice(0, 15), allSigns: all };
   return out;
 }
 
@@ -106,6 +108,17 @@ function group(signs) {
   }
   const rank = { closure: 0, accident: 1, incident: 2, lanes: 3 };
   return items.sort((a, b) => rank[a.severity] - rank[b.severity]);
+}
+
+// Debug view of every sign returned: where it is, what it shows, and whether the app kept it.
+function rawView(ctrl, st, kept) {
+  const ext = st.vmsStatusExtensionG || {}, loc = ext.vmsLocation?.locPointLocation || {};
+  const c = loc.pointByCoordinates?.pointCoordinates || {};
+  const text = (st.vmsMessage || []).flatMap((m) => (m.vmsMessage?.displayAreaSettings || []).flatMap((d) =>
+    (d.displayAreaSettings?.vmsTextDisplay?.textLine || []).map((l) => l.textLine?.textLine).filter(Boolean))).join(" / ");
+  return { ident: ext.externalIdentifier || ctrl.vmsControllerReference?.idG, roads: (loc.supplementaryPositionalDescription?.roadInformation || []).map((r) => r.roadName),
+    kmFromRoute: c.latitude ? +distToRouteKm(+c.latitude, +c.longitude).toFixed(2) : null, status: st.workingStatus || null,
+    types: (st.vmsMessage || []).flatMap((m) => m.vmsMessage?.messageInformationType || []), text: text || null, kept };
 }
 
 function hash(s) { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) | 0; return (h >>> 0).toString(36); }

@@ -4,7 +4,7 @@ Live incidents, accidents, lane closures and road closures on the A14 from Newma
 
 ## What's in the folder
 
-- `index.html` – the app (live list with filters, "Accidents 24h" tab, "Local updates" tab with Suffolk Constabulary posts, Orwell Bridge status, interactive map)
+- `index.html` – the app: Live (list, filters, Orwell Bridge status, map, "Open in Waze / Google Maps" links), Accidents (last 24 hours), Waze (official Waze live map) and Local (Suffolk Constabulary posts) tabs
 - `netlify/functions/a14.mjs` – the page's data endpoint: closures, overhead sign messages and the 24-hour accident list (cached for 90 seconds)
 - `netlify/functions/poll.mjs` – runs every 5 minutes on its own so accidents are recorded even when nobody has the page open
 - `netlify/functions/route.mjs` – the A14's real shape and junction positions from OpenStreetMap (cached for a week)
